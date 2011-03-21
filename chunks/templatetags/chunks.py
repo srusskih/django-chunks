@@ -17,27 +17,34 @@ def do_get_chunk(parser, token):
         cache_time = 0
     if len(tokens) == 3:
         tag_name, key, cache_time = tokens
+
     # Check to see if the key is properly double/single quoted
-    if not (key[0] == key[-1] and key[0] in ('"', "'")):
-        raise template.TemplateSyntaxError, "%r tag's argument should be in quotes" % tag_name
-    # Send key without quotes and caching time
-    return ChunkNode(key[1:-1], cache_time)
-    
+    if (key[0] == key[-1] and key[0] in ('"', "'")):
+        return ChunkNode(key[1:-1], cache_time)
+
+    key = parser.compile_filter(key)
+    return ChunkNode(key, cache_time)
+
 class ChunkNode(template.Node):
     def __init__(self, key, cache_time=0):
        self.key = key
        self.cache_time = cache_time
     
     def render(self, context):
-        try:
-            cache_key = CACHE_PREFIX + self.key
-            c = cache.get(cache_key)
-            if c is None:
-                c = Chunk.objects.get(key=self.key)
-                cache.set(cache_key, c, int(self.cache_time))
-            content = c.content
-        except Chunk.DoesNotExist:
-            content = ''
+        if not isinstance(self.key, unicode):
+            key = self.key.resolve(context)
+        else:
+            key = self.key
+
+        cache_key = CACHE_PREFIX + key
+        c = cache.get(cache_key)
+
+        if c is None:
+            c, created = Chunk.objects.\
+                get_or_create(key=key, defaults={'content': key})
+            cache.set(cache_key, c, int(self.cache_time))
+
+        content = c.content
         return content
         
 register.tag('chunk', do_get_chunk)
